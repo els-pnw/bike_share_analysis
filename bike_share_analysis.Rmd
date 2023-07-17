@@ -1,0 +1,271 @@
+---
+title: "How does a bike-share navigate speedy success?"
+author: "Eric L Sammons"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Hypothesis / Question
+Based on bike share rider data, what steps could we take to convert more casual riders to a paid membership?
+
+## Setup
+
+```{r Install required libraries, echo=FALSE}
+# install.packages("readr")
+# install.packages("data.table")
+# install.packages("tidyverse")
+# install.packages("dplyr")
+# install.packages("scales")
+# install.packages("viridis")
+```
+
+### Load required libraries
+
+```{r Load required libraries, message=FALSE, warning=FALSE}
+library(readr)
+library(data.table)
+library(tidyverse)
+library(dplyr)
+library(scales)
+library(viridis)
+```
+
+### Set variables
+
+```{r Set variables, echo=TRUE}
+base_url <- "https://divvy-tripdata.s3.amazonaws.com/"  # Replace with the actual URL
+destination_folder <- "data/"
+months <- c("202205", "202206", "202207", "202208", "202209", "202210",
+            "202211", "202212", "202301", "202302", "202303", "202304", "202305")
+```
+
+## Functions required to download and validate data files
+
+```{r Download and extract function, include=TRUE, echo=TRUE}
+download_and_extract_csv <- function(url, destination_folder) {
+  # Extract the filename from the URL
+  filename <- basename(url)
+  
+  # Download the zip file
+  if (!file.exists(paste0(destination_folder, filename))) {
+    download.file(url, destfile = paste0(destination_folder, filename))
+    
+    # Extract the CSV file from the zip
+    unzip(zipfile = paste0(destination_folder, filename),
+          files = gsub("\\..*", ".csv", filename),
+          exdir = destination_folder)
+  }
+}
+```
+
+
+```{r Check Column names funcion, include=TRUE, echo=TRUE}
+check_column_names <- function(file_paths) {
+  # Read the column names from the first file
+  column_names <- fread(file_paths[1])$names
+  
+  # Check column names in all files
+  all_same <- all(sapply(file_paths, function(path) {
+    identical(column_names, fread(path)$names)
+  }))
+  
+  return(all_same)
+}
+```
+
+## Download and Extract data files 
+In this step we will leverage the list of YYYYMM to download 12 months of
+data. Files will only be downloaded if they do not already exist in the 
+destination folder (/data/, by default).
+
+```{r Download and extract data, echo=TRUE}
+for (month in months) {
+  url <- paste0(base_url, month, "-divvy-tripdata.zip")
+  download_and_extract_csv(url, destination_folder)
+}
+```
+
+## Validate the datafiles and create a single dataframe
+Column names must be the same across all CSV files. If column names are not the 
+same additional work will be required and is outside the scope of this effort.
+
+```{r Check columns and build dataframe, echo=TRUE, message=FALSE, warning=FALSE}
+csv_files <- list.files(destination_folder, pattern = "\\.csv$", full.names = TRUE)
+
+if (!check_column_names(csv_files)) {
+  stop("Not all files have the same column names.")
+}
+
+df <- map_dfr(csv_files, read_csv)
+```
+
+## Housekeeping
+
+### Remove columns not required
+For our analysis we will not require the following colunns:
+
+- start_lat
+- start_lng
+- end_lat
+- end_lng
+
+```{r Remove columns, include=TRUE, echo=TRUE}
+df <- df %>%
+  select(-c(start_lat, start_lng, end_lat, end_lng))
+
+colnames(df)
+```
+## Rider type summary
+
+```{r Verify values in member_casual, include=TRUE, echo=TRUE}
+table(df$member_casual)
+```
+
+## Data transformations
+
+### Break down the started_at column
+
+```{r Break down the started_at column, include=TRUE, echo=TRUE}
+df$date <- as.Date(df$started_at)
+df$month <- format(as.Date(df$date), "%m")
+df$day <- format(as.Date(df$date), "%d")
+df$year <- format(as.Date(df$date), "%Y")
+df$day_of_week <- format(as.Date(df$date), "%A")
+```
+ 
+### Create ride_length column
+
+```{r ride_length, include=TRUE, echo=TRUE}
+df$ride_length <- difftime(df$ended_at, df$started_at)
+df$ride_length <- as.numeric(df$ride_length)
+
+str(df$ride_length)
+```
+### Remove rows with ride_length < 0
+
+```{r Remove invalid data, include=TRUE, echo=TRUE}
+df <- df[!(df$ride_length < 0),]
+```
+
+## Analysis
+
+### Ride length summary
+
+```{r Analysis, include=TRUE, echo=TRUE}
+summary(df$ride_length)
+```
+
+### Ride length summary member vs casual
+
+```{r member vs casual, include=TRUE, echo=TRUE}
+comparison <- aggregate(df$ride_length, by = list(df$member_casual), FUN = function(x)
+  c(mean = mean(x),
+    median = median(x),
+    max = max(x),
+    min = min(x)))
+
+comparison
+```
+### Average ride time by day of week and member type
+Here we look at the mean *ride_length* grouped by *day_of_week* and *member_casual*
+
+```{r message=FALSE, warning=FALSE}
+df %>%
+  mutate(day_of_week = factor(day_of_week, levels = c("Sunday", "Monday", 
+                                                      "Tuesday", "Wednesday", 
+                                                      "Thursday", "Friday", 
+                                                      "Saturday"))) %>%
+  group_by(day_of_week,member_casual) %>%
+  summarise(mean = mean(ride_length))
+```
+
+### Create Analysis Dataframe
+To make the next steps a bit easier we will create a new dataframe. This dataframe, rider_analysis, will focus on:
+
+- Number of riders
+- Average duration of ride (in minutes)
+- By day of week
+- By member type (member_casual)
+
+```{r message=FALSE}
+rider_analysis <- df %>%
+  mutate(weekday = wday(started_at, label = TRUE)) %>%
+  group_by(member_casual, weekday) %>%
+  summarise(number_of_riders = n(),
+             average_ride_duration = mean(ride_length)) %>%
+  arrange(member_casual, weekday)
+```
+
+### Quick Look At Average Duration vs. Number of Rides
+In this plot we take a quick look at the number of rides and their average duration (in minutes) by day of the week.
+
+```{r}
+color_theme <- c("#F05039", "#7CA1CC")
+
+ggplot(rider_analysis) +
+  geom_point(mapping = aes(x = average_ride_duration, 
+                           y = number_of_riders, 
+                           color = member_casual)) +
+  facet_wrap(~ weekday) +
+  labs(x = "Average duration (minutes)", 
+       y = "Number of rides", color = "Day of Week") +
+  scale_color_manual(values = color_theme) +
+  scale_y_continuous(labels = scales::comma)
+```
+
+### Bike Share: Number of Riders By Weekday and Rider Type
+Here we visualize the number of riders by day of week and whether the rider is a member of casual.
+
+```{r Visualize ridership}
+ggplot(rider_analysis) +
+  geom_col(mapping = aes(x=weekday, 
+                         y=number_of_riders, 
+                         fill=member_casual), 
+           position = "dodge") +
+  labs(title = "Bike Share: Number of Rides",
+       subtitle = "By Weekday",
+       y = "Number of rides", 
+       x = "Day of week",
+       fill = "Casual or Member") +
+  scale_x_discrete(limits = rev(c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"))) +
+  scale_y_continuous(labels = scales::comma, 
+                     limits = c(0,max(rider_analysis$number_of_riders) + 100000)) +
+  theme(axis.text.x = element_text(angle = 25)) +
+  coord_flip()
+```
+
+### Bike Share: Average Duration By Weekday
+Here we visualize the average duration of rides by day of week and whether the rider is a member of casual.
+
+```{r}
+ggplot(rider_analysis) +
+  geom_col(mapping = aes(x = weekday, 
+                         y = average_ride_duration, 
+                         fill = member_casual),
+           position = "dodge") +
+  labs(title = "Bike Share: Average Duration",
+       subtitle = "By Weekday",
+       y = "Average ride duration (minutes)",
+       x = "Day of week", 
+       fill = "Casual or Member") +
+  scale_x_discrete(limits = rev(c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"))) +
+  scale_y_continuous(labels = scales::comma, 
+                     limits = c(0,max(rider_analysis$average_ride_duration))) +
+  theme(axis.text.x = element_text(angle = 25)) +
+  coord_flip()
+```
+
+## Conclusion
+In conclusion we find the following that casual riders are riding longer, on average, vs their member counterparts. However, we see that there are far more member riders than casual riders on most days of the week. On weekends we do see that the number of casual rides vs member rides are nearly the same.
+
+## Recommendation
+Based on our findings here the following recommendaions may help convert casual riders to a paid membership.
+
+- Introduce a weekend only membership.
+- Introduce a discount program for members who ride longer.
