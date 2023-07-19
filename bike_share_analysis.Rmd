@@ -188,7 +188,7 @@ df %>%
 ### Create Analysis Dataframe
 To make the next steps a bit easier we will create a new dataframe. This dataframe, rider_analysis, will focus on:
 
-- Number of riders
+- Number of rides
 - Average duration of ride (in minutes)
 - By day of week
 - By member type (member_casual)
@@ -197,7 +197,7 @@ To make the next steps a bit easier we will create a new dataframe. This datafra
 rider_analysis <- df %>%
   mutate(weekday = wday(started_at, label = TRUE)) %>%
   group_by(member_casual, weekday) %>%
-  summarise(number_of_riders = n(),
+  summarise(number_of_rides = n(),
              average_ride_duration = mean(ride_length)) %>%
   arrange(member_casual, weekday)
 ```
@@ -210,7 +210,7 @@ color_theme <- c("#F05039", "#7CA1CC")
 
 ggplot(rider_analysis) +
   geom_point(mapping = aes(x = average_ride_duration, 
-                           y = number_of_riders, 
+                           y = number_of_rides, 
                            color = member_casual)) +
   facet_wrap(~ weekday) +
   labs(x = "Average duration (minutes)", 
@@ -219,13 +219,13 @@ ggplot(rider_analysis) +
   scale_y_continuous(labels = scales::comma)
 ```
 
-### Bike Share: Number of Riders By Weekday and Rider Type
-Here we visualize the number of riders by day of week and whether the rider is a member of casual.
+### Bike Share: Number of Rides By Weekday and Rider Type
+Here we visualize the number of rides by day of week and whether the rider is a member of casual.
 
 ```{r Visualize ridership}
 ggplot(rider_analysis) +
   geom_col(mapping = aes(x=weekday, 
-                         y=number_of_riders, 
+                         y=number_of_rides, 
                          fill=member_casual), 
            position = "dodge") +
   labs(title = "Bike Share: Number of Rides",
@@ -235,7 +235,7 @@ ggplot(rider_analysis) +
        fill = "Casual or Member") +
   scale_x_discrete(limits = rev(c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"))) +
   scale_y_continuous(labels = scales::comma, 
-                     limits = c(0,max(rider_analysis$number_of_riders) + 100000)) +
+                     limits = c(0,max(rider_analysis$number_of_rides) + 100000)) +
   theme(axis.text.x = element_text(angle = 25)) +
   coord_flip()
 ```
@@ -267,5 +267,5 @@ In conclusion we find the following that casual riders are riding longer, on ave
 ## Recommendation
 Based on our findings here the following recommendaions may help convert casual riders to a paid membership.
 
-- Introduce a weekend only membership.
+- Introduce a weekend only membership that includes discounts for riding on weekdays.
 - Introduce a discount program for members who ride longer.
